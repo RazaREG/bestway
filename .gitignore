@@ -11,6 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
+*.zip
+*.apk
+*.aab
+android/app/release/
 
 # Editor directories and files
 .vscode/*
@@ -23,4 +27,3 @@ dist-ssr
 *.sln
 *.sw?
 .env
-

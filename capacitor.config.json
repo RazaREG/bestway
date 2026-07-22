@@ -1,0 +1,11 @@
+{
+  "appId": "com.bestway.panel",
+  "appName": "Bestway",
+  "webDir": "dist",
+  "plugins": {
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#0f172a"
+    }
+  }
+}

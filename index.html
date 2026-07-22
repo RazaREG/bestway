@@ -2,21 +2,42 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Bestway Jobs Schedule — v2</title>
-
-    <!-- Icons / favicon -->
-    <link rel="icon" type="image/png" href="/icons/icon-192.png" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-
-    <!-- ✅ PWA manifest -->
-    <link rel="manifest" href="/manifest.json" />
-
-    <!-- ✅ Modern install hint -->
-    <meta name="mobile-web-app-capable" content="yes" />
-    <!-- Optional theme color for the address bar -->
-    <meta name="theme-color" content="#111111" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="google-play-verification" content="Owner of Bestway Insulation app (com.bestway.panel). Contact: muhammadraza202501@gmail.com" />
+    <title>Bestway Admin</title>
   </head>
+  <style>
+    html, body {
+      background-color: #0b0f23 !important;
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
+
+    .dropdown-toggle::after {
+      display: none !important;
+    }
+
+    #root {
+      padding-top: env(safe-area-inset-top);
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+      padding-bottom: env(safe-area-inset-bottom);
+      height: 100%;
+    }
+    .premium-card {
+      border-radius: 16px;
+      transition: all 0.25s ease;
+    }
+    .premium-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 12px 30px rgba(0,0,0,0.08);
+    }
+    .job-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 30px rgba(0,0,0,0.08);
+    }
+  </style>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
