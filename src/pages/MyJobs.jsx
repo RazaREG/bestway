@@ -41,6 +41,19 @@ import {
   roundStock,
 } from "../utils/inventoryStock";
 
+function formatLocalDate(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addLocalDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
 /* ================= MAIN ================= */
 export default function MyJobs() {
   const [sessions, setSessions] = useState({});
@@ -84,7 +97,7 @@ export default function MyJobs() {
   async function loadJobs() {
     try {
       setLoading(true);
-      const today = new Date().toISOString().split("T")[0];
+      const today = formatLocalDate();
 
       const { data: assignments, error: aErr } = await supabase
         .from("job_assignments")
@@ -108,9 +121,7 @@ export default function MyJobs() {
       });
       setAssigneesByJob(assigneeMap);
 
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const tomorrowStr = tomorrow.toISOString().split("T")[0];
+      const tomorrowStr = formatLocalDate(addLocalDays(new Date(), 1));
 
       const { data: jobsData, error: jErr } = await supabase
         .from("jobs")
@@ -585,11 +596,11 @@ export default function MyJobs() {
   }
 
   const currentJobs = activeTab === "today" ? todayJobs : tomorrowJobs;
-  const today = new Date().toISOString().split("T")[0];
+  const today = formatLocalDate();
 
   const isSameDay = (dateStr) => {
     if (!dateStr) return false;
-    return new Date(dateStr).toISOString().split("T")[0] === today;
+    return formatLocalDate(new Date(dateStr)) === today;
   };
 
   function formatTime(timeStr) {

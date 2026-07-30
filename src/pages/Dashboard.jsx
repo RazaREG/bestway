@@ -24,6 +24,13 @@ import { isAdminOrSubAdmin, getCrewRoleIds } from "../roles";
 
 import { computeJobStatus } from "../jobStatus";
 
+function formatLocalDate(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export default function Dashboard() {
   const [stats, setStats] = useState({});
   const [loading, setLoading] = useState(true);
@@ -51,7 +58,7 @@ export default function Dashboard() {
   const loadAdminDashboard = async () => {
     setLoading(true);
     try {
-      const today = new Date().toLocaleDateString("en-CA");
+      const today = formatLocalDate();
 
       const [{ data: jobs }, { data: crews }] = await Promise.all([
         supabase.from("jobs").select("id, status, start_date"),
@@ -153,7 +160,7 @@ export default function Dashboard() {
 
       if (jobsErr) throw jobsErr;
 
-      const today = new Date().toISOString().split("T")[0];
+      const today = formatLocalDate();
 
       const todayJobsArray = (jobs || []).filter((j) => j.start_date === today);
 

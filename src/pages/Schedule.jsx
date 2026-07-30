@@ -81,6 +81,7 @@ export default function Schedule() {
   const [jobs, setJobs] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingJob, setEditingJob] = useState(null);
+  const [reschedulingJob, setReschedulingJob] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: '', address: '' });
   const [cancellingJob, setCancellingJob] = React.useState(null);
@@ -327,7 +328,11 @@ export default function Schedule() {
     const user = JSON.parse(localStorage.getItem("user"));
 
     // 1️⃣ Update job details
-    const payload = { ...uiToDb(draft), created_by: user.id };
+    const payload = {
+      ...uiToDb(draft),
+      created_by: user.id,
+      ...(reschedulingJob ? { status: "new", remarks: null } : {}),
+    };
     const { data: jobData, error: jobError } = await supabase
       .from('jobs')
       .update(payload)
@@ -371,6 +376,7 @@ export default function Schedule() {
     setJobs(prev => prev.map(job => job.id === editingJob.id ? dbToUi(jobData) : job));
     setModalOpen(false);
     setEditingJob(null);
+    setReschedulingJob(false);
   }
 
   async function deleteJob(jobId) {
@@ -403,8 +409,9 @@ export default function Schedule() {
     }
   }
 
-  async function editJob(job) {
+  async function editJob(job, { reschedule = false } = {}) {
     setEditingJob(job);
+    setReschedulingJob(reschedule);
 
     // 1️⃣ Load existing assignments
     const { data: assignments, error } = await supabase
@@ -470,6 +477,7 @@ export default function Schedule() {
     // Preserve the currently-selected day (from draft) when opening the "Schedule New Job" modal.
     // Also prefer existing draft crew/customer if available, otherwise fall back to first crew/customer.
     setEditingJob(null);
+    setReschedulingJob(false);
     setDraft(prev => {
       const firstCrew = crews[0] || {};
       const firstCustomer = customers[0] || {};
@@ -496,6 +504,7 @@ export default function Schedule() {
 
   function resetJobModal() {
     setEditingJob(null);
+    setReschedulingJob(false);
 
     setDraft({
       customerId: null,
@@ -518,6 +527,11 @@ export default function Schedule() {
     setLeadWorkers([]);
     setAssignedWorkers([]);
     setStep(1);
+  }
+
+  function closeJobModal() {
+    setModalOpen(false);
+    setReschedulingJob(false);
   }
 
 
@@ -953,6 +967,20 @@ export default function Schedule() {
                           >
                             Edit
                           </button>
+                          {job.status === 'cancelled' && (
+                            <button
+                              onClick={() => editJob(job, { reschedule: true })}
+                              style={{
+                                ...btnSmall,
+                                background: '#2563eb',
+                                color: '#fff',
+                                border: 'none',
+                                fontWeight: 500
+                              }}
+                            >
+                              Reschedule
+                            </button>
+                          )}
                           <button 
                             onClick={() => {
                               console.log('Complete job:', job.id);
@@ -1157,7 +1185,7 @@ export default function Schedule() {
 
           <div
             className="job-modal-overlay"
-            onClick={() => setModalOpen(false)}
+            onClick={closeJobModal}
           >
             <div
               className="job-modal"
@@ -1166,13 +1194,13 @@ export default function Schedule() {
               {/* HEADER */}
               <div className="job-modal-header">
                 <div>
-                  {editingJob ? "Edit Job" : "Schedule New Job"}
+                  {reschedulingJob ? "Reschedule Job" : editingJob ? "Edit Job" : "Schedule New Job"}
                   <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
                     Step {step} of 2
                   </div>
                 </div>
                 <button
-                  onClick={() => setModalOpen(false)}
+                  onClick={closeJobModal}
                   style={{
                     fontSize: 22,
                     border: "none",
@@ -1505,7 +1533,7 @@ export default function Schedule() {
                         : addJob({ leadWorkers, assignedWorkers })
                     }
                   >
-                    {editingJob ? "Update Job" : "Create Job"}
+                    {reschedulingJob ? "Reschedule Job" : editingJob ? "Update Job" : "Create Job"}
                   </button>
                 )}
               </div>
@@ -1688,6 +1716,7 @@ function dbToUi(db, days = []) {
     start: db.start || db.start_time,
     durationMin: db.duration_min,
     jobType: db.job_type,
+    status: db.status,
     area: db.area,
     sqft: db.sqft,
     thicknessIn: db.thickness_in,
