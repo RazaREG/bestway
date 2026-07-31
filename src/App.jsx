@@ -90,8 +90,11 @@ function RoleRoute({ children, allow = [], allowAnyCrew = false }) {
 export default function App() {
   const location = useLocation();
   const isApp = Capacitor.isNativePlatform();
-  const hideTopNavRoutes = ["/login", "/signup", "/"];
-  const hideTopNav = hideTopNavRoutes.includes(location.pathname);
+  const publicBrowserPath = window.location.pathname.replace(/\/+$/, "");
+  const isDirectPrivacyPolicyRequest = publicBrowserPath.endsWith("/privacy-policy");
+  const hideTopNavRoutes = ["/login", "/signup", "/", "/privacy-policy"];
+  const hideTopNav =
+    hideTopNavRoutes.includes(location.pathname) || isDirectPrivacyPolicyRequest;
 
   const [authChanged, setAuthChanged] = React.useState(0);
 
@@ -106,6 +109,14 @@ export default function App() {
 
     setupStatusBar();
   }, []);
+
+  if (!isApp && isDirectPrivacyPolicyRequest) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#f8fafc" }}>
+        <PrivacyPolicy />
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "rgb(221 232 242)" }}>
