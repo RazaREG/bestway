@@ -20,7 +20,9 @@ import {
   FiSearch,
   FiCalendar,
   FiClock,
+  FiTrash2,
   FiMapPin,
+  FiPackage,
   FiUsers,
   FiEye,
   FiEyeOff,
@@ -29,6 +31,8 @@ import {
   FiUser,
   FiInfo,
   FiFilter,
+  FiEdit2,
+  FiRefreshCw,
 } from "react-icons/fi";
 import {
   computeJobStatus,
@@ -36,10 +40,22 @@ import {
   JOB_STATUS_FILTERS,
 } from "../jobStatus";
 
+const STATUS_OPTIONS = ["new", "started", "completed", "cancelled"];
+
 export default function JobDetails() {
   const [jobs, setJobs] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const navigate = useNavigate();
+  const currentUser = JSON.parse(localStorage.getItem("user"));
+
+  function openJobEditor(job, reschedule = false) {
+    navigate("/schedule", {
+      state: {
+        editJobId: job.id,
+        reschedule,
+      },
+    });
+  }
 
   const [search, setSearch] = React.useState("");
   const [jobDate, setJobDate] = React.useState("");
@@ -55,6 +71,8 @@ export default function JobDetails() {
   const [mediaModalShow, setMediaModalShow] = useState(false);
   const [selectedJobMedia, setSelectedJobMedia] = useState([]);
   const [mediaLoading, setMediaLoading] = useState(false);
+  const [savingStatusId, setSavingStatusId] = React.useState(null);
+  const [deletingJobId, setDeletingJobId] = React.useState(null);
 
   function dateToDayIdx(dateStr) {
     if (!dateStr) return null;
@@ -186,6 +204,9 @@ export default function JobDetails() {
       { data: mediaRows, error: mediaError },
       { data: sessions, error: sessionsErr },
       { data: assignments, error: assignErr },
+      { data: activityRows, error: activityErr },
+      { data: usageRows, error: usageErr },
+      { data: inventoryLogRows, error: inventoryLogErr },
     ] = await Promise.all([
       supabase.from("job_media").select("job_id").in("job_id", jobIds),
       supabase
@@ -193,13 +214,72 @@ export default function JobDetails() {
         .select("job_id, user_id, ended_at, duration_min")
         .in("job_id", jobIds),
       supabase.from("job_assignments").select("job_id, user_id").in("job_id", jobIds),
+      supabase
+        .from("job_activity_log")
+        .select("id, job_id, user_id, action, created_at, meta")
+        .in("job_id", jobIds)
+        .eq("action", "job_completed")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("job_inventory_usage")
+        .select("*")
+        .in("job_id", jobIds)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("inventory_logs")
+        .select("*")
+        .eq("action_type", "job_used")
+        .order("created_at", { ascending: false }),
     ]);
 
     if (mediaError) throw mediaError;
     if (sessionsErr) throw sessionsErr;
     if (assignErr) throw assignErr;
+    if (activityErr) throw activityErr;
+    if (usageErr) {
+      console.warn("job_inventory_usage read skipped:", usageErr.message);
+    }
+    if (inventoryLogErr) {
+      console.warn("inventory_logs read skipped:", inventoryLogErr.message);
+    }
+
+    const usageLogs = usageErr ? [] : usageRows || [];
+    const inventoryLogs = inventoryLogRows || [];
+    const inventoryItemIds = [
+      ...new Set(
+        [...usageLogs, ...inventoryLogs].map((log) => log.item_id).filter(Boolean)
+      ),
+    ];
+    const inventoryUserIds = [
+      ...new Set(
+        [...usageLogs, ...inventoryLogs]
+          .map((log) => log.user_id || log.created_by || log.added_by)
+          .filter(Boolean)
+      ),
+    ];
+
+    const [
+      { data: inventoryItems, error: inventoryItemsErr },
+      { data: inventoryUsers, error: inventoryUsersErr },
+    ] = await Promise.all([
+      inventoryItemIds.length
+        ? supabase.from("inventory_items").select("id, name, unit").in("id", inventoryItemIds)
+        : { data: [] },
+      inventoryUserIds.length
+        ? supabase.from("app_users").select("id, email").in("id", inventoryUserIds)
+        : { data: [] },
+    ]);
+
+    if (inventoryItemsErr) throw inventoryItemsErr;
+    if (inventoryUsersErr) throw inventoryUsersErr;
 
     const mediaJobIds = new Set(mediaRows?.map((m) => m.job_id));
+    const inventoryItemById = new Map(
+      (inventoryItems || []).map((item) => [item.id, item])
+    );
+    const inventoryUserById = new Map(
+      (inventoryUsers || []).map((user) => [user.id, user])
+    );
 
     const assigneesByJob = {};
     (assignments || []).forEach((a) => {
@@ -207,11 +287,47 @@ export default function JobDetails() {
       assigneesByJob[a.job_id].push(a.user_id);
     });
 
+    const activityByJob = {};
+    (activityRows || []).forEach((log) => {
+      if (!activityByJob[log.job_id]) activityByJob[log.job_id] = [];
+      activityByJob[log.job_id].push(log);
+    });
+
+    const usageByJob = {};
+    usageLogs.forEach((log) => {
+      if (!usageByJob[log.job_id]) usageByJob[log.job_id] = [];
+      usageByJob[log.job_id].push({
+        ...log,
+        item: inventoryItemById.get(log.item_id),
+        user:
+          inventoryUserById.get(log.user_id) ||
+          inventoryUserById.get(log.created_by) ||
+          inventoryUserById.get(log.added_by),
+      });
+    });
+
     return jobsData.map((job) => {
       const jobSessions = sessions?.filter((s) => s.job_id === job.id) || [];
+      const inventoryActivity = (activityByJob[job.id] || []).filter(
+        (log) =>
+          Array.isArray(log?.meta?.materials_used) &&
+          log.meta.materials_used.length > 0
+      );
+      const inventoryStockLogs = inventoryLogs
+        .filter((log) => log.note?.includes(`Job #${job.id}`))
+        .map((log) => ({
+          ...log,
+          item: inventoryItemById.get(log.item_id),
+          created_by_user: inventoryUserById.get(log.created_by),
+          parsed: parseInventoryJobNote(log.note),
+        }));
+
       return {
         ...job,
         hasMedia: mediaJobIds.has(job.id),
+        jobInventoryUsage: usageByJob[job.id] || [],
+        inventoryActivity,
+        inventoryStockLogs,
         computed_status: computeJobStatus(
           job,
           jobSessions,
@@ -276,6 +392,92 @@ export default function JobDetails() {
       alert(err.message || "Failed to load jobs");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function updateJobStatus(job, nextStatus) {
+    if (!job || nextStatus === (job.status || job.computed_status)) return;
+
+    if (job.computed_status === "completed") {
+      alert("Completed jobs cannot be updated from this page.");
+      return;
+    }
+
+    const ok = window.confirm(
+      `Do you want to update status from ${job.status || job.computed_status || "new"} to ${nextStatus}?`
+    );
+
+    if (!ok) return;
+
+    setSavingStatusId(job.id);
+
+    try {
+      const { error } = await supabase
+        .from("jobs")
+        .update({
+          status: nextStatus,
+          status_updated_by: currentUser?.id || null,
+        })
+        .eq("id", job.id);
+
+      if (error) throw error;
+
+      await loadJobs();
+    } catch (err) {
+      alert(err.message || "Failed to update job status");
+    } finally {
+      setSavingStatusId(null);
+    }
+  }
+
+  async function deleteJob(job) {
+    if (!job) return;
+
+    if (job.computed_status !== "new") {
+      alert("Only new jobs can be deleted.");
+      return;
+    }
+
+    const ok = window.confirm(
+      `Delete this new job for ${job.customer?.name || "selected customer"}? This cannot be undone.`
+    );
+
+    if (!ok) return;
+
+    setDeletingJobId(job.id);
+
+    try {
+      const relatedTables = [
+        "job_assignments",
+        "job_activity_log",
+        "job_work_sessions",
+        "job_inventory_usage",
+        "notifications",
+        "job_media",
+      ];
+
+      for (const table of relatedTables) {
+        const { error } = await supabase.from(table).delete().eq("job_id", job.id);
+
+        if (error) {
+          console.warn(`${table} cleanup skipped:`, error.message);
+        }
+      }
+
+      const { error } = await supabase.from("jobs").delete().eq("id", job.id);
+
+      if (error) throw error;
+
+      setExpanded((prev) => {
+        const next = { ...prev };
+        delete next[job.id];
+        return next;
+      });
+      await loadJobs();
+    } catch (err) {
+      alert(err.message || "Failed to delete job");
+    } finally {
+      setDeletingJobId(null);
     }
   }
 
@@ -349,6 +551,230 @@ export default function JobDetails() {
             </Col>
           ))}
         </Row>
+      </div>
+    );
+  }
+
+  function InventoryUsedSection({ job }) {
+    if (job.computed_status !== "completed") return null;
+
+    const usageLogs = job.jobInventoryUsage || [];
+    const activityLogs = job.inventoryActivity || [];
+    const stockLogs = job.inventoryStockLogs || [];
+
+    return (
+      <div className="inventory-used-section mt-3">
+        <div className="inventory-used-header">
+          <div>
+            <div className="inventory-used-title">
+              <FiPackage />
+              Inventory / Stock Used
+            </div>
+            <div className="inventory-used-subtitle">
+              Materials recorded when this job was completed.
+            </div>
+          </div>
+        </div>
+
+        {usageLogs.length === 0 && activityLogs.length === 0 && stockLogs.length === 0 ? (
+          <div className="inventory-empty">
+            No inventory usage was recorded for this completed job.
+          </div>
+        ) : (
+          <>
+          {usageLogs.length > 0 && (
+            <div className="inventory-log-block">
+              <div className="inventory-log-meta">
+                Added from job inventory usage
+                <span>{usageLogs.length} item{usageLogs.length === 1 ? "" : "s"}</span>
+              </div>
+
+              <div className="inventory-used-grid">
+                {usageLogs.map((log) => (
+                  <div className="inventory-used-card" key={log.id}>
+                    <div className="inventory-item-name">
+                      {log.item?.name || log.item_name || "Inventory item"}
+                    </div>
+                    <div className="inventory-item-details">
+                      <span>
+                        Added by:{" "}
+                        <strong>{log.user?.email || log.user_email || log.user_id || "Unknown"}</strong>
+                      </span>
+                      <span>
+                        Recorded:{" "}
+                        <strong>
+                          {log.created_at ? new Date(log.created_at).toLocaleString() : "-"}
+                        </strong>
+                      </span>
+                      <span>
+                        Used:{" "}
+                        <strong>
+                          {formatInventoryNumber(log.quantity)} {log.unit || log.item?.unit || ""}
+                        </strong>
+                      </span>
+                      <span>
+                        Stock deducted:{" "}
+                        <strong>
+                          {formatInventoryNumber(log.stock_deducted)}{" "}
+                          {log.unit || log.item?.unit || ""}
+                        </strong>
+                      </span>
+                      <span>
+                        Previous stock:{" "}
+                        <strong>
+                          {formatInventoryNumber(log.previous_stock)}{" "}
+                          {log.unit || log.item?.unit || ""}
+                        </strong>
+                      </span>
+                      <span>
+                        Remaining:{" "}
+                        <strong>
+                          {formatInventoryNumber(log.remaining_stock)}{" "}
+                          {log.unit || log.item?.unit || ""}
+                        </strong>
+                      </span>
+                      {log.deduct_ratio != null && (
+                        <span>
+                          Deduct ratio:{" "}
+                          <strong>{formatInventoryNumber(log.deduct_ratio)}</strong>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activityLogs.map((log) => {
+            const addedBy =
+              log.meta?.inventory_added_by ||
+              log.meta?.completed_by ||
+              log.user_id ||
+              "Unknown";
+            const addedAt = log.created_at
+              ? new Date(log.created_at).toLocaleString()
+              : "-";
+
+            return (
+              <div className="inventory-log-block" key={log.id}>
+                <div className="inventory-log-meta">
+                  Added by <strong>{addedBy}</strong>
+                  <span>on {addedAt}</span>
+                </div>
+
+                <div className="inventory-used-grid">
+                  {(log.meta?.materials_used || []).map((item, index) => (
+                    <div
+                      className="inventory-used-card"
+                      key={`${log.id}-${item.item_id || item.item_name || index}`}
+                    >
+                      <div className="inventory-item-name">
+                        {item.item_name || "Inventory item"}
+                      </div>
+                      <div className="inventory-item-details">
+                        <span>
+                          Used:{" "}
+                          <strong>
+                            {formatInventoryNumber(item.quantity)} {item.unit || ""}
+                          </strong>
+                        </span>
+                        <span>
+                          Stock deducted:{" "}
+                          <strong>
+                            {formatInventoryNumber(item.stock_deducted)} {item.unit || ""}
+                          </strong>
+                        </span>
+                        <span>
+                          Previous stock:{" "}
+                          <strong>
+                            {formatInventoryNumber(item.previous_stock)} {item.unit || ""}
+                          </strong>
+                        </span>
+                        <span>
+                          Remaining:{" "}
+                          <strong>
+                            {formatInventoryNumber(item.remaining_stock)} {item.unit || ""}
+                          </strong>
+                        </span>
+                        {item.deduct_ratio != null && (
+                          <span>
+                            Deduct ratio:{" "}
+                            <strong>{formatInventoryNumber(item.deduct_ratio)}</strong>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          {stockLogs.length > 0 && (
+            <div className="inventory-log-block">
+              <div className="inventory-log-meta">
+                Stock log records
+                <span>found from inventory history</span>
+              </div>
+
+              <div className="inventory-used-grid">
+                {stockLogs.map((log) => (
+                  <div className="inventory-used-card" key={log.id}>
+                    <div className="inventory-item-name">
+                      {log.item?.name || "Inventory item"}
+                    </div>
+                    <div className="inventory-item-details">
+                      <span>
+                        Added by:{" "}
+                        <strong>{log.created_by_user?.email || log.created_by || "Unknown"}</strong>
+                      </span>
+                      <span>
+                        Recorded:{" "}
+                        <strong>
+                          {log.created_at ? new Date(log.created_at).toLocaleString() : "-"}
+                        </strong>
+                      </span>
+                      {log.parsed?.enteredQty != null && (
+                        <span>
+                          Used:{" "}
+                          <strong>
+                            {formatInventoryNumber(log.parsed.enteredQty)} {log.item?.unit || ""}
+                          </strong>
+                        </span>
+                      )}
+                      <span>
+                        Stock deducted:{" "}
+                        <strong>
+                          {formatInventoryNumber(log.quantity)} {log.item?.unit || ""}
+                        </strong>
+                      </span>
+                      <span>
+                        Previous stock:{" "}
+                        <strong>
+                          {formatInventoryNumber(log.previous_stock)} {log.item?.unit || ""}
+                        </strong>
+                      </span>
+                      <span>
+                        Remaining:{" "}
+                        <strong>
+                          {formatInventoryNumber(log.new_stock)} {log.item?.unit || ""}
+                        </strong>
+                      </span>
+                      {log.parsed?.ratio != null && (
+                        <span>
+                          Deduct ratio:{" "}
+                          <strong>{formatInventoryNumber(log.parsed.ratio)}</strong>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          </>
+        )}
       </div>
     );
   }
@@ -455,6 +881,19 @@ export default function JobDetails() {
             font-weight: 700 !important;
           }
 
+          .job-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+          }
+
+          .status-select {
+            min-width: 135px;
+            border-radius: 10px !important;
+            font-weight: 600 !important;
+          }
+
           .details-panel {
             background: #f8fafc;
             color: #0f172a;
@@ -480,6 +919,81 @@ export default function JobDetails() {
             font-weight: 800;
             text-transform: uppercase;
             margin-bottom: 4px;
+          }
+
+          .inventory-used-section {
+            border-radius: 16px;
+            border: 1px solid #dbe3ef;
+            background: #fff;
+            padding: 14px;
+          }
+
+          .inventory-used-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 12px;
+          }
+
+          .inventory-used-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #0f172a;
+            font-weight: 800;
+          }
+
+          .inventory-used-subtitle,
+          .inventory-log-meta,
+          .inventory-empty {
+            color: #64748b;
+            font-size: 12px;
+          }
+
+          .inventory-empty {
+            border-radius: 12px;
+            border: 1px dashed #cbd5e1;
+            background: #f8fafc;
+            padding: 12px;
+          }
+
+          .inventory-log-block + .inventory-log-block {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #e2e8f0;
+          }
+
+          .inventory-log-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-bottom: 10px;
+          }
+
+          .inventory-used-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+          }
+
+          .inventory-used-card {
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            background: #f8fafc;
+            padding: 11px;
+          }
+
+          .inventory-item-name {
+            font-weight: 800;
+            margin-bottom: 7px;
+          }
+
+          .inventory-item-details {
+            display: grid;
+            gap: 4px;
+            color: #475569;
+            font-size: 12px;
           }
 
           .mobile-job-card {
@@ -613,6 +1127,10 @@ export default function JobDetails() {
 
           @media (max-width: 768px) {
             .detail-grid {
+              grid-template-columns: 1fr;
+            }
+
+            .inventory-used-grid {
               grid-template-columns: 1fr;
             }
           }
@@ -789,22 +1307,73 @@ export default function JobDetails() {
                           <Badge bg={statusBadgeVariant(job.computed_status)} pill>
                             {(job.computed_status || "new").toUpperCase()}
                           </Badge>
+                          {job.computed_status !== "completed" && (
+                            <Form.Select
+                              size="sm"
+                              className="mt-2 status-select"
+                              value={job.status || job.computed_status || "new"}
+                              disabled={savingStatusId === job.id}
+                              onChange={(e) => updateJobStatus(job, e.target.value)}
+                            >
+                              {STATUS_OPTIONS.map((status) => (
+                                <option key={status} value={status}>
+                                  {status}
+                                </option>
+                              ))}
+                            </Form.Select>
+                          )}
                         </td>
                         <td>
-                          <Button
-                            size="sm"
-                            variant={open ? "outline-dark" : "dark"}
-                            className="view-btn"
-                            onClick={() =>
-                              setExpanded((p) => ({
-                                ...p,
-                                [job.id]: !open,
-                              }))
-                            }
-                          >
-                            {open ? <FiEyeOff /> : <FiEye />}
-                            {open ? "Hide" : "View"}
-                          </Button>
+                          <div className="job-actions">
+                            {job.computed_status === "cancelled" && (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline-warning"
+                                  className="view-btn"
+                                  onClick={() => openJobEditor(job)}
+                                >
+                                  <FiEdit2 />
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="primary"
+                                  className="view-btn"
+                                  onClick={() => openJobEditor(job, true)}
+                                >
+                                  <FiRefreshCw />
+                                  Reschedule
+                                </Button>
+                              </>
+                            )}
+                            <Button
+                              size="sm"
+                              variant={open ? "outline-dark" : "dark"}
+                              className="view-btn"
+                              onClick={() =>
+                                setExpanded((p) => ({
+                                  ...p,
+                                  [job.id]: !open,
+                                }))
+                              }
+                            >
+                              {open ? <FiEyeOff /> : <FiEye />}
+                              {open ? "Hide" : "View"}
+                            </Button>
+                            {job.computed_status === "new" && (
+                              <Button
+                                size="sm"
+                                variant="outline-danger"
+                                className="view-btn"
+                                disabled={deletingJobId === job.id}
+                                onClick={() => deleteJob(job)}
+                              >
+                                <FiTrash2 />
+                                {deletingJobId === job.id ? "Deleting" : "Delete"}
+                              </Button>
+                            )}
+                          </div>
                         </td>
                       </tr>
 
@@ -842,6 +1411,8 @@ export default function JobDetails() {
                                 <div className="detail-label">Notes</div>
                                 <div>{job.notes || "-"}</div>
                               </div>
+
+                              <InventoryUsedSection job={job} />
 
                               {job.hasMedia && (
                                 <Button
@@ -898,6 +1469,22 @@ export default function JobDetails() {
                       </Badge>
                     </div>
 
+                    {job.computed_status !== "completed" && (
+                      <Form.Select
+                        size="sm"
+                        className="mt-3 status-select"
+                        value={job.status || job.computed_status || "new"}
+                        disabled={savingStatusId === job.id}
+                        onChange={(e) => updateJobStatus(job, e.target.value)}
+                      >
+                        {STATUS_OPTIONS.map((status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
+                      </Form.Select>
+                    )}
+
                     <div className="mobile-info">
                       <div className="mobile-info-row">
                         <strong>Start Date:</strong> {job.start_date || "---"}
@@ -934,6 +1521,42 @@ export default function JobDetails() {
                       {open ? "Hide Details" : "View Details"}
                     </Button>
 
+                    {job.computed_status === "new" && (
+                      <Button
+                        size="sm"
+                        variant="outline-danger"
+                        className="mt-2 w-100 view-btn justify-content-center"
+                        disabled={deletingJobId === job.id}
+                        onClick={() => deleteJob(job)}
+                      >
+                        <FiTrash2 />
+                        {deletingJobId === job.id ? "Deleting" : "Delete Job"}
+                      </Button>
+                    )}
+
+                    {job.computed_status === "cancelled" && (
+                      <div className="d-grid gap-2 mt-2">
+                        <Button
+                          size="sm"
+                          variant="outline-warning"
+                          className="view-btn justify-content-center"
+                          onClick={() => openJobEditor(job)}
+                        >
+                          <FiEdit2 />
+                          Edit Job
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          className="view-btn justify-content-center"
+                          onClick={() => openJobEditor(job, true)}
+                        >
+                          <FiRefreshCw />
+                          Reschedule Job
+                        </Button>
+                      </div>
+                    )}
+
                     <Collapse in={open}>
                       <div className="mt-3">
                         <div className="detail-grid">
@@ -958,6 +1581,8 @@ export default function JobDetails() {
                           <div className="detail-label">Notes</div>
                           <div>{job.notes || "-"}</div>
                         </div>
+
+                        <InventoryUsedSection job={job} />
 
                         {job.hasMedia && (
                           <Button
@@ -1082,4 +1707,24 @@ function DetailBox({ label, value }) {
       <div className="fw-semibold">{value}</div>
     </div>
   );
+}
+
+function formatInventoryNumber(value) {
+  if (value == null || value === "") return "0";
+  const number = Number(value);
+  if (Number.isNaN(number)) return String(value);
+  return Number.isInteger(number) ? String(number) : number.toFixed(2);
+}
+
+function parseInventoryJobNote(note) {
+  if (!note) return null;
+
+  const match = String(note).match(/:\s*([\d.]+)\s+(.+?)\s+[×x]\s+ratio\s+([\d.]+)/i);
+  if (!match) return null;
+
+  return {
+    enteredQty: Number(match[1]),
+    unit: match[2],
+    ratio: Number(match[3]),
+  };
 }

@@ -491,6 +491,24 @@ export default function MyJobs() {
           created_by: user.id,
         });
 
+        const { error: usageError } = await supabase
+          .from("job_inventory_usage")
+          .insert({
+            job_id: completingJob.id,
+            item_id: item.id,
+            user_id: user.id,
+            quantity: entered,
+            deduct_ratio: ratio,
+            stock_deducted: deduct,
+            unit: item.unit,
+            previous_stock: item.stock_qty,
+            remaining_stock: newStock,
+          });
+
+        if (usageError) {
+          console.warn("job_inventory_usage insert skipped:", usageError.message);
+        }
+
         if (newStock <= item.min_threshold) {
           await supabase.from("notifications").insert({
             user_id: "c2d4fe04-689c-47c2-a17c-f3fa9a7c2bf8",

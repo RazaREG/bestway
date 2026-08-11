@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient';
 import Modal from "react-bootstrap/Modal";
 import Button from "react-bootstrap/Button";
 import Form from "react-bootstrap/Form";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { FiArrowLeft } from "react-icons/fi";
 import { isAdminOrSubAdmin, getCrewRoleIds, userBelongsToCrew } from "../roles";
 import { useActionLock } from "../hooks/useActionLock";
@@ -89,6 +89,8 @@ export default function Schedule() {
   const [users, setUsers] = React.useState([]);
 
   const navigate = useNavigate();
+  const location = useLocation();
+  const handledEditJobId = React.useRef(null);
 
   const [step, setStep] = React.useState(1);
   const [assignedUsers, setAssignedUsers] = React.useState([]);
@@ -240,6 +242,32 @@ export default function Schedule() {
     }
   })();
 }, [user, days]);
+
+  React.useEffect(() => {
+    const editJobId = location.state?.editJobId;
+    if (!editJobId || loading || handledEditJobId.current === editJobId) return;
+
+    handledEditJobId.current = editJobId;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from("jobs")
+        .select("*")
+        .eq("id", editJobId)
+        .single();
+
+      if (error || !data) {
+        handledEditJobId.current = null;
+        alert(error?.message || "Job could not be loaded for editing.");
+        return;
+      }
+
+      navigate("/schedule", { replace: true, state: null });
+      await editJob(dbToUi(data, days), {
+        reschedule: Boolean(location.state?.reschedule),
+      });
+    })();
+  }, [loading, location.state, days, navigate]);
 
   function getCanadaCreatedAt() {
     return new Date(

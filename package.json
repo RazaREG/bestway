@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "assets:generate": "capacitor-assets generate",
+    "ios:prepare": "npm run build && cap sync ios",
+    "ios:open": "cap open ios",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -30,6 +33,8 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/ios": "^7.6.8",
     "@eslint/js": "^9.33.0",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",

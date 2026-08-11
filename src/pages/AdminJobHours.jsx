@@ -49,6 +49,23 @@ function formatHours(minutes) {
   return `${hours}h ${mins}m`;
 }
 
+function formatSessionTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+
+  return date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatSessionWindow(session) {
+  if (!session?.started_at && !session?.ended_at) return "No time recorded";
+
+  return `${formatSessionTime(session.started_at)} - ${formatSessionTime(session.ended_at)}`;
+}
+
 function toDateTimeLocal(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -594,6 +611,27 @@ export default function AdminJobHours() {
             text-transform: capitalize;
           }
 
+          .member-session-times {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 6px;
+          }
+
+          .member-session-time {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            color: #475569;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 3px 6px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+          }
+
           .muted-line {
             color: #64748b;
             font-size: 12px;
@@ -871,6 +909,21 @@ export default function AdminJobHours() {
                                   {member.user?.email || "Unknown member"}
                                 </div>
                                 <div className="member-role">{member.role || "worker"}</div>
+                                <div className="member-session-times">
+                                  {member.sessions.length > 0 ? (
+                                    member.sessions.map((session) => (
+                                      <span className="member-session-time" key={session.id}>
+                                        <FiClock />
+                                        {formatSessionWindow(session)}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="member-session-time">
+                                      <FiClock />
+                                      No time recorded
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                               <div className="fw-bold">{formatHours(member.minutes)}</div>
                               <Button

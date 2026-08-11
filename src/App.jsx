@@ -45,8 +45,12 @@ function useAuthUser() {
     // safer interval check (better than storage event for mobile apps)
     const interval = setInterval(checkUser, 500);
 
-    StatusBar.setBackgroundColor({ color: '#ffffff' });
-    StatusBar.setStyle({ style: Style.Dark });
+    if (Capacitor.isNativePlatform()) {
+      Promise.allSettled([
+        StatusBar.setBackgroundColor({ color: '#ffffff' }),
+        StatusBar.setStyle({ style: Style.Dark }),
+      ]);
+    }
 
     return () => {
       clearInterval(interval);
